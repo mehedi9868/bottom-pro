@@ -25,7 +25,7 @@ TRADE_SIZE=config["TRADE_SIZE"]
 MAX_TRADES=config["MAX_TRADES"]
 MARGIN_TYPE=config["MARGIN_TYPE"]
 
-STOP_LOSS_PERCENT=2
+STOP_LOSS_PERCENT=.01
 TAKE_PROFIT_PERCENT=10
 
 TRAIL_START=3
@@ -222,10 +222,10 @@ def indicator_score(symbol):
 
     signal="HOLD"
 
-    if score>=80:
+    if score>=70:
         signal="BUY"
 
-    if score<=20:
+    if score<=30:
         signal="SELL"
 
     pnl=calculate_pnl(symbol)
@@ -242,8 +242,219 @@ def indicator_score(symbol):
 
 
 # ---------------- OPEN TRADE ----------------
-
 def open_trade(symbol,side):
+
+    if symbol in active_trades:
+        return
+
+    if len(active_trades)>=MAX_TRADES:
+        return
+
+    price=float(client.futures_mark_price(symbol=symbol)["markPrice"])
+
+    qty=safe_quantity(symbol,price)
+
+    try:
+
+        set_margin(symbol)
+
+        client.futures_change_leverage(
+            symbol=symbol,
+            leverage=LEVERAGE
+        )
+
+        # MARKET ENTRY
+        client.futures_create_order(
+            symbol=symbol,
+            side=SIDE_BUY if side=="BUY" else SIDE_SELL,
+            type=ORDER_TYPE_MARKET,
+            quantity=qty
+        )
+
+        entry=price
+
+        # TP SL CALCULATION
+        if side=="BUY":
+            sl=entry*(1-STOP_LOSS_PERCENT/100)
+            tp=entry*(1+TAKE_PROFIT_PERCENT/100)
+            close_side=SIDE_SELL
+        else:
+            sl=entry*(1+STOP_LOSS_PERCENT/100)
+            tp=entry*(1-TAKE_PROFIT_PERCENT/100)
+            close_side=SIDE_BUY
+
+        active_trades[symbol]={
+            "side":side,
+            "entry":entry,
+            "sl":sl,
+            "tp":tp,
+            "highest":entry
+        }
+
+        # STOP LOSS ORDER
+        client.futures_create_order(
+            symbol=symbol,
+            side=close_side,
+            type="STOP_MARKET",
+            stopPrice=round(sl,6),
+            workingType="MARK_PRICE",
+            closePosition=True
+        )
+
+        # TAKE PROFIT ORDER
+        client.futures_create_order(
+            symbol=symbol,
+            side=close_side,
+            type="TAKE_PROFIT_MARKET",
+            stopPrice=round(tp,6),
+            workingType="MARK_PRICE",
+            closePosition=True
+        )
+
+        print(f"TRADE OPENED {symbol} {side} | Entry:{entry} TP:{tp} SL:{sl}")
+
+    except Exception as e:
+        print("TRADE ERROR:",e)
+
+    if symbol in active_trades:
+        return
+
+    if len(active_trades)>=MAX_TRADES:
+        return
+
+    price=float(client.futures_mark_price(symbol=symbol)["markPrice"])
+
+    qty=safe_quantity(symbol,price)
+
+    try:
+
+        set_margin(symbol)
+
+        client.futures_change_leverage(
+            symbol=symbol,
+            leverage=LEVERAGE
+        )
+
+        # MARKET ENTRY
+        client.futures_create_order(
+            symbol=symbol,
+            side=SIDE_BUY if side=="BUY" else SIDE_SELL,
+            type=ORDER_TYPE_MARKET,
+            quantity=qty
+        )
+
+        entry=price
+
+        # TP SL CALCULATION
+        if side=="BUY":
+            sl=entry*(1-STOP_LOSS_PERCENT/100)
+            tp=entry*(1+TAKE_PROFIT_PERCENT/100)
+            close_side=SIDE_SELL
+        else:
+            sl=entry*(1+STOP_LOSS_PERCENT/100)
+            tp=entry*(1-TAKE_PROFIT_PERCENT/100)
+            close_side=SIDE_BUY
+
+        active_trades[symbol]={
+            "side":side,
+            "entry":entry,
+            "sl":sl,
+            "tp":tp,
+            "highest":entry
+        }
+
+        # STOP LOSS ORDER
+        client.futures_create_order(
+            symbol=symbol,
+            side=close_side,
+            type="STOP_MARKET",
+            stopPrice=round(sl,6),
+            workingType="MARK_PRICE",
+            closePosition=True
+        )
+
+        # TAKE PROFIT ORDER
+        client.futures_create_order(
+            symbol=symbol,
+            side=close_side,
+            type="TAKE_PROFIT_MARKET",
+            stopPrice=round(tp,6),
+            workingType="MARK_PRICE",
+            closePosition=True
+        )
+
+        print(f"TRADE OPENED {symbol} {side} | Entry:{entry} TP:{tp} SL:{sl}")
+
+    except Exception as e:
+        print("TRADE ERROR:",e)
+
+    if symbol in active_trades:
+        return
+
+    if len(active_trades)>=MAX_TRADES:
+        return
+
+    price=float(client.futures_mark_price(symbol=symbol)["markPrice"])
+
+    qty=safe_quantity(symbol,price)
+
+    try:
+
+        set_margin(symbol)
+
+        client.futures_change_leverage(
+            symbol=symbol,
+            leverage=LEVERAGE
+        )
+
+        # OPEN MARKET ORDER
+        client.futures_create_order(
+            symbol=symbol,
+            side=SIDE_BUY if side=="BUY" else SIDE_SELL,
+            type=ORDER_TYPE_MARKET,
+            quantity=qty
+        )
+
+        entry=price
+
+        # TP SL CALCULATION
+        if side=="BUY":
+            sl=entry*(1-STOP_LOSS_PERCENT/100)
+            tp=entry*(1+TAKE_PROFIT_PERCENT/100)
+            close_side=SIDE_SELL
+        else:
+            sl=entry*(1+STOP_LOSS_PERCENT/100)
+            tp=entry*(1-TAKE_PROFIT_PERCENT/100)
+            close_side=SIDE_BUY
+
+        active_trades[symbol]={
+            "side":side,
+            "entry":entry,
+            "sl":sl,
+            "tp":tp,
+            "highest":entry
+        }
+
+        # STOP LOSS ORDER
+        # client.futures_create_order(
+        #     symbol=symbol,
+        #     side=close_side,
+        #     type="STOP_MARKET",
+        #     stopPrice=round(sl,4),
+        #     closePosition=True
+        # )
+
+        # TAKE PROFIT ORDER
+        client.futures_create_order(
+            symbol=symbol,
+            side=close_side,
+            type="TAKE_PROFIT_MARKET",
+            stopPrice=round(tp,4),
+            closePosition=True
+        )
+
+    except Exception as e:
+        print(e)
 
     if symbol in active_trades:
         return
@@ -280,6 +491,15 @@ def open_trade(symbol,side):
             "tp":entry*(1+TAKE_PROFIT_PERCENT/100),
             "highest":entry
         }
+
+        # TAKE PROFIT ORDER
+        client.futures_create_order(
+            symbol=symbol,
+            side=close_side,
+            type="TAKE_PROFIT_MARKET",
+            stopPrice=round(tp,4),
+            closePosition=True
+        )
 
     except Exception as e:
         print(e)
@@ -372,10 +592,10 @@ def bot_loop():
 
                 results.append(r)
 
-                if r["score"] >= 70:
+                if r["score"] >= 60:
                  open_trade(s,"BUY")
 
-                elif r["score"] <= 30:
+                elif r["score"] <= 40:
                     open_trade(s,"SELL")
 
             except:
