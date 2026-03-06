@@ -8,7 +8,6 @@ import tkinter as tk
 
 from gui_monitor import open_trades,signal_log,scan_log,top_candidates,pair_stats,BotGUI
 
-
 with open("config.json") as f:
     config=json.load(f)
 
@@ -17,9 +16,7 @@ API_SECRET=config["api_secret"]
 
 TRADE_SIZE=config["TRADE_SIZE"]
 MAX_TRADES=config["MAX_TRADES"]
-
 PRICE_INTERVAL=config["PRICE_INTERVAL"]
-SCAN_COINS=config["SCAN_COINS"]
 ATR_PERIOD=config["ATR_PERIOD"]
 
 client=Client(API_KEY,API_SECRET)
@@ -65,6 +62,13 @@ for s in info["symbols"]:
     }
 
 pair_stats["total"]=len(ACTIVE_SYMBOLS)
+
+
+def format_quantity(qty,step):
+
+    precision=int(round(-math.log(step,10),0))
+
+    return round(qty,precision)
 
 
 def get_price(symbol):
@@ -119,6 +123,13 @@ def create_trade(symbol,price,atr):
             qty=min_qty
 
         quantity=math.floor(qty/step)*step
+        quantity=format_quantity(quantity,step)
+
+        notional=quantity*price
+
+        if notional<5:
+            signal_log.append("Order skipped (<5 USDT)")
+            return
 
         order=client.futures_create_order(
             symbol=symbol,
@@ -144,6 +155,14 @@ def create_trade(symbol,price,atr):
     except Exception as e:
 
         signal_log.append(str(e))
+
+
+def manual_buy(symbol):
+
+    price=get_price(symbol)
+    atr=calculate_ATR(symbol)
+
+    create_trade(symbol,price,atr)
 
 
 def close_position(symbol):
@@ -220,6 +239,31 @@ def update_trades():
             pass
 
 
+def get_top_movers():
+
+    tickers=client.futures_ticker()
+
+    coins=[]
+
+    for t in tickers:
+
+        symbol=t["symbol"]
+
+        if symbol not in ACTIVE_SYMBOLS:
+            continue
+
+        change=float(t["priceChangePercent"])
+
+        coins.append({
+            "symbol":symbol,
+            "percent":change
+        })
+
+    coins.sort(key=lambda x:x["percent"],reverse=True)
+
+    return coins[:10]
+
+
 def bot_loop():
 
     while True:
@@ -227,6 +271,19 @@ def bot_loop():
         try:
 
             pair_stats["scanned"]=0
+
+            start=time.time()
+
+            coins=get_top_movers()
+
+            top_candidates.clear()
+
+            for c in coins:
+
+                top_candidates.append({
+                    "symbol":c["symbol"],
+                    "score":round(c["percent"],2)
+                })
 
             for symbol in ACTIVE_SYMBOLS:
 
@@ -240,14 +297,11 @@ def bot_loop():
 
                 score=50
 
-                top_candidates.append({
-                    "symbol":symbol,
-                    "score":score
-                })
-
                 if score>=50 and len(open_trades)<MAX_TRADES:
 
                     create_trade(symbol,price,atr)
+
+            pair_stats["round_time"]=round(time.time()-start,2)
 
             update_trades()
 

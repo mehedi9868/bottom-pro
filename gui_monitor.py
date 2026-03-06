@@ -7,15 +7,10 @@ signal_log=[]
 scan_log=[]
 top_candidates=[]
 
-stats_data={
-    "wins":0,
-    "losses":0,
-    "profit":0
-}
-
 pair_stats={
     "total":0,
-    "scanned":0
+    "scanned":0,
+    "round_time":0
 }
 
 class BotGUI:
@@ -24,12 +19,12 @@ class BotGUI:
 
         self.root=root
         root.title("Crypto Trading Terminal")
-        root.geometry("1300x750")
+        root.geometry("1300x780")
 
         bar=tk.Frame(root)
         bar.pack(fill=tk.X)
 
-        self.balance=tk.Label(bar,text="Futures Balance: 0 USDT")
+        self.balance=tk.Label(bar,text="Balance: 0 USDT")
         self.balance.pack(side=tk.LEFT,padx=10)
 
         self.update_label=tk.Label(bar,text="")
@@ -63,10 +58,10 @@ class BotGUI:
         btn_frame=tk.Frame(root)
         btn_frame.pack(fill=tk.X)
 
-        self.close_btn=tk.Button(btn_frame,text="Close Selected Trade",
-                                 command=self.close_trade)
+        close_btn=tk.Button(btn_frame,text="Close Selected Trade",
+                            command=self.close_trade)
 
-        self.close_btn.pack(side=tk.RIGHT,padx=10)
+        close_btn.pack(side=tk.RIGHT,padx=10)
 
         bottom=tk.Frame(root)
         bottom.pack(fill=tk.BOTH,expand=True)
@@ -74,20 +69,61 @@ class BotGUI:
         scan_frame=tk.LabelFrame(bottom,text="Scanning")
         scan_frame.pack(side=tk.LEFT,fill=tk.BOTH,expand=True)
 
+        self.scan_timer=tk.Label(scan_frame,text="Round Time: 0s")
+        self.scan_timer.pack()
+
+        self.progress=ttk.Progressbar(
+            scan_frame,
+            orient="horizontal",
+            length=350,
+            mode="determinate"
+        )
+
+        self.progress.pack(pady=5)
+
         self.scan=tk.Listbox(scan_frame)
         self.scan.pack(fill=tk.BOTH,expand=True)
 
-        top_frame=tk.LabelFrame(bottom,text="Top Signals")
+        top_frame=tk.LabelFrame(bottom,text="Top Movers")
         top_frame.pack(side=tk.RIGHT,fill=tk.BOTH,expand=True)
 
-        self.top=ttk.Treeview(top_frame,columns=("Coin","Score"),show="headings")
+        self.top=ttk.Treeview(
+            top_frame,
+            columns=("Coin","Percent"),
+            show="headings"
+        )
 
         self.top.heading("Coin",text="Coin")
-        self.top.heading("Score",text="Score")
+        self.top.heading("Percent",text="% Change")
 
         self.top.pack(fill=tk.BOTH,expand=True)
 
+        buy_btn=tk.Button(
+            top_frame,
+            text="Manual BUY",
+            command=self.manual_buy
+        )
+
+        buy_btn.pack(pady=5)
+
         self.update_gui()
+
+    def manual_buy(self):
+
+        selected=self.top.selection()
+
+        if not selected:
+            return
+
+        item=self.top.item(selected[0])
+
+        symbol=item["values"][0]
+
+        try:
+            from pro_bot import manual_buy
+            manual_buy(symbol)
+        except:
+            pass
 
     def close_trade(self):
 
@@ -121,6 +157,20 @@ class BotGUI:
 
         self.pairs.config(
             text=f"Pairs: {pair_stats['scanned']} / {pair_stats['total']}"
+        )
+
+        total=pair_stats["total"]
+        scanned=pair_stats["scanned"]
+
+        if total>0:
+            percent=(scanned/total)*100
+        else:
+            percent=0
+
+        self.progress["value"]=percent
+
+        self.scan_timer.config(
+            text=f"Round Time: {pair_stats.get('round_time',0)}s"
         )
 
         while signal_log:
@@ -161,7 +211,7 @@ class BotGUI:
         for r in self.top.get_children():
             self.top.delete(r)
 
-        for c in top_candidates[:5]:
+        for c in top_candidates[:10]:
             self.top.insert("",tk.END,values=(c["symbol"],c["score"]))
 
         self.root.after(1500,self.update_gui)
