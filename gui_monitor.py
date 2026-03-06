@@ -6,12 +6,17 @@ top30=[]
 top_candidates=[]
 pair_stats={"total":0,"scanned":0,"last_scan":""}
 
+close_callback=None
+
 class BotGUI:
 
-    def __init__(self,root):
+    def __init__(self,root,close_fn):
+
+        global close_callback
+        close_callback=close_fn
 
         self.root=root
-        root.title("AI Futures Scanner")
+        root.title("AI Futures Bot")
         root.geometry("1200x720")
 
         topbar=tk.Frame(root)
@@ -32,10 +37,10 @@ class BotGUI:
         self.list30=tk.Listbox(frame1)
         self.list30.pack(fill=tk.BOTH,expand=True)
 
-        frame2=tk.LabelFrame(root,text="Top 10 Signals")
+        frame2=tk.LabelFrame(root,text="Top Signals")
         frame2.pack(fill=tk.BOTH,expand=True,padx=10,pady=5)
 
-        cols=("Rank","Coin","Signal","Score","Profit%","Entry","SL","TP")
+        cols=("Rank","Coin","Signal","Score","Entry","SL","TP","PNL","Close")
 
         self.tree=ttk.Treeview(frame2,columns=cols,show="headings")
 
@@ -47,8 +52,24 @@ class BotGUI:
 
         self.tree.tag_configure("buy",foreground="green")
         self.tree.tag_configure("sell",foreground="red")
+        self.tree.tag_configure("profit",foreground="green")
+        self.tree.tag_configure("loss",foreground="red")
+
+        self.tree.bind("<Button-1>",self.on_click)
 
         self.update_gui()
+
+    def on_click(self,event):
+
+        item=self.tree.identify_row(event.y)
+        col=self.tree.identify_column(event.x)
+
+        if col=="#9":
+
+            symbol=self.tree.item(item,"values")[1]
+
+            if close_callback:
+                close_callback(symbol)
 
     def update_gui(self):
 
@@ -89,18 +110,19 @@ class BotGUI:
                     c["symbol"],
                     c["signal"],
                     c["score"],
-                    c["profit"],
-                    c["entry"],
-                    c["sl"],
-                    c["tp"]
+                    round(c["entry"],4),
+                    round(c["sl"],4),
+                    round(c["tp"],4),
+                    c["pnl"],
+                    "Close"
                 )
             )
 
-            if c["signal"]=="BUY":
-                self.tree.item(row,tags=("buy",))
+            if c["pnl"]>0:
+                self.tree.item(row,tags=("profit",))
 
-            if c["signal"]=="SELL":
-                self.tree.item(row,tags=("sell",))
+            elif c["pnl"]<0:
+                self.tree.item(row,tags=("loss",))
 
             rank+=1
 
