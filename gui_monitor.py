@@ -7,53 +7,71 @@ top_candidates=[]
 pair_stats={"total":0,"scanned":0,"last_scan":""}
 
 close_callback=None
+buy_callback=None
+sell_callback=None
+
 
 class BotGUI:
 
-    def __init__(self,root,close_fn):
+    def __init__(self,root,close_fn,buy_fn,sell_fn):
 
-        global close_callback
+        global close_callback,buy_callback,sell_callback
+
         close_callback=close_fn
+        buy_callback=buy_fn
+        sell_callback=sell_fn
 
         self.root=root
-        root.title("AI Futures Bot")
-        root.geometry("1200x720")
+        root.title("AI Futures Bot PRO")
+        root.geometry("1250x720")
+        root.configure(bg="#111")
 
-        topbar=tk.Frame(root)
-        topbar.pack(fill=tk.X)
+        style=ttk.Style()
+        style.theme_use("default")
 
-        self.time_label=tk.Label(topbar,text="")
+        # ---------- TOP BAR ----------
+
+        topbar=tk.Frame(root,bg="#111")
+        topbar.pack(fill=tk.X,pady=5)
+
+        self.time_label=tk.Label(topbar,text="",fg="white",bg="#111",font=("Arial",11))
         self.time_label.pack(side=tk.LEFT,padx=10)
 
-        self.scan_label=tk.Label(topbar,text="")
+        self.scan_label=tk.Label(topbar,text="",fg="white",bg="#111",font=("Arial",11))
         self.scan_label.pack(side=tk.LEFT,padx=20)
 
         self.progress=ttk.Progressbar(topbar,length=300)
         self.progress.pack(side=tk.RIGHT,padx=20)
 
-        frame1=tk.LabelFrame(root,text="Selected 30 Coins")
+        # ---------- COIN LIST ----------
+
+        frame1=tk.LabelFrame(root,text="Top 30 Coins",fg="white",bg="#111")
         frame1.pack(fill=tk.BOTH,expand=True,padx=10,pady=5)
 
-        self.list30=tk.Listbox(frame1)
-        self.list30.pack(fill=tk.BOTH,expand=True)
+        self.list30=tk.Listbox(frame1,font=("Arial",10))
+        self.list30.pack(fill=tk.BOTH,expand=True,padx=5,pady=5)
 
-        frame2=tk.LabelFrame(root,text="Top Signals")
+        # ---------- SIGNAL TABLE ----------
+
+        frame2=tk.LabelFrame(root,text="Top Signals",fg="white",bg="#111")
         frame2.pack(fill=tk.BOTH,expand=True,padx=10,pady=5)
 
-        cols=("Rank","Coin","Signal","Score","Entry","SL","TP","PNL","Close")
+        cols=("Rank","Coin","Signal","Score","Entry","SL","TP","PNL","BUY","SELL","CLOSE")
 
-        self.tree=ttk.Treeview(frame2,columns=cols,show="headings")
+        self.tree=ttk.Treeview(frame2,columns=cols,show="headings",height=15)
 
-        for c in cols:
+        widths=[50,90,80,70,100,100,100,70,70,70,80]
+
+        for i,c in enumerate(cols):
             self.tree.heading(c,text=c)
-            self.tree.column(c,width=110)
+            self.tree.column(c,width=widths[i],anchor="center")
 
         self.tree.pack(fill=tk.BOTH,expand=True)
 
-        self.tree.tag_configure("buy",foreground="green")
-        self.tree.tag_configure("sell",foreground="red")
-        self.tree.tag_configure("profit",foreground="green")
-        self.tree.tag_configure("loss",foreground="red")
+        self.tree.tag_configure("buy",foreground="#00ff7f")
+        self.tree.tag_configure("sell",foreground="#ff5c5c")
+        self.tree.tag_configure("profit",foreground="#00ff7f")
+        self.tree.tag_configure("loss",foreground="#ff5c5c")
 
         self.tree.bind("<Button-1>",self.on_click)
 
@@ -64,10 +82,23 @@ class BotGUI:
         item=self.tree.identify_row(event.y)
         col=self.tree.identify_column(event.x)
 
+        if not item:
+            return
+
+        symbol=self.tree.item(item,"values")[1]
+
+        # BUY button
         if col=="#9":
+            if buy_callback:
+                buy_callback(symbol,"BUY")
 
-            symbol=self.tree.item(item,"values")[1]
+        # SELL button
+        elif col=="#10":
+            if sell_callback:
+                sell_callback(symbol,"SELL")
 
+        # CLOSE button
+        elif col=="#11":
             if close_callback:
                 close_callback(symbol)
 
@@ -114,7 +145,9 @@ class BotGUI:
                     round(c["sl"],4),
                     round(c["tp"],4),
                     c["pnl"],
-                    "Close"
+                    "BUY",
+                    "SELL",
+                    "CLOSE"
                 )
             )
 

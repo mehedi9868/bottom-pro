@@ -2,7 +2,7 @@
   "api_key": "oEreYj9TUVcKWJswqMMdQJo4mPQYBHIxFCA9cRATUAWHCygeLa61N31JBcvXFuEO",
   "api_secret": "mQsCtnB8kbjLdkFPwxpJ3kKZhUaV9Lw9LdjbGB29nQURblDbI6FytTcZ2XHWqkEv",
   "LEVERAGE": 10,
-  "TRADE_SIZE": 1,
+  "TRADE_SIZE": 10,
   "MAX_TRADES": 1,
   "BOTTOM_PERCENT": 0.03,
   "ATR_PERIOD": 14,

@@ -2,6 +2,7 @@ import json
 import time
 import threading
 import statistics
+import math
 from datetime import datetime,timedelta
 
 from binance.client import Client
@@ -9,6 +10,9 @@ from binance.enums import *
 
 import tkinter as tk
 from gui_monitor import top30,top_candidates,pair_stats,BotGUI
+
+
+# ---------------- CONFIG ----------------
 
 with open("config.json") as f:
     config=json.load(f)
@@ -27,12 +31,16 @@ TAKE_PROFIT_PERCENT=10
 TRAIL_START=3
 TRAIL_STEP=1
 
+
 client=Client(API_KEY,API_SECRET)
 
-symbol_precision={}
+symbol_filters={}
 active_trades={}
 active_30=[]
 next_scan=datetime.now()
+
+
+# ---------------- LOAD SYMBOL INFO ----------------
 
 def load_symbols():
 
@@ -45,44 +53,73 @@ def load_symbols():
         if not symbol.endswith("USDT"):
             continue
 
+        step=None
+        min_qty=None
+
         for f in s["filters"]:
 
             if f["filterType"]=="LOT_SIZE":
 
                 step=float(f["stepSize"])
-                precision=str(step)[::-1].find('.')
+                min_qty=float(f["minQty"])
 
-                symbol_precision[symbol]=precision
+        symbol_filters[symbol]={
+            "step":step,
+            "min_qty":min_qty
+        }
+
 
 load_symbols()
 
-ACTIVE_SYMBOLS=list(symbol_precision.keys())
+ACTIVE_SYMBOLS=list(symbol_filters.keys())
 
 pair_stats["total"]=len(ACTIVE_SYMBOLS)
 
-def format_qty(symbol,qty):
 
-    precision=symbol_precision.get(symbol,3)
-    return round(qty,precision)
+# ---------------- SAFE QUANTITY ----------------
 
-def adjust_min_notional(symbol,price,qty):
+def format_quantity(symbol,qty):
 
-    if price*qty<5:
-        qty=5/price
+    step=symbol_filters[symbol]["step"]
+
+    precision=int(round(-math.log(step,10),0))
+
+    qty=math.floor(qty*(10**precision))/(10**precision)
 
     return qty
+
+
+def safe_quantity(symbol,price):
+
+    qty=TRADE_SIZE/price
+
+    min_notional=5.5
+
+    if qty*price<min_notional:
+        qty=min_notional/price
+
+    qty=format_quantity(symbol,qty)
+
+    if qty<symbol_filters[symbol]["min_qty"]:
+        qty=symbol_filters[symbol]["min_qty"]
+
+    return qty
+
+
+# ---------------- MARGIN ----------------
 
 def set_margin(symbol):
 
     try:
-
         client.futures_change_margin_type(
             symbol=symbol,
             marginType=MARGIN_TYPE
         )
-
     except:
         pass
+
+
+# ---------------- PNL ----------------
 
 def calculate_pnl(symbol):
 
@@ -101,6 +138,9 @@ def calculate_pnl(symbol):
         pnl=-pnl
 
     return round(pnl,2)
+
+
+# ---------------- FAST SCAN ----------------
 
 def fast_scan():
 
@@ -121,6 +161,9 @@ def fast_scan():
         low=float(t["lowPrice"])
         price=float(t["lastPrice"])
 
+        if price<=0:
+            continue
+
         volatility=((high-low)/price)*100
 
         score=0
@@ -140,13 +183,15 @@ def fast_scan():
 
     return [r[0] for r in results[:30]]
 
+
+# ---------------- SIGNAL ----------------
+
 def indicator_score(symbol):
 
     klines=client.futures_klines(symbol=symbol,interval="5m",limit=120)
 
     closes=[float(k[4]) for k in klines]
     highs=[float(k[2]) for k in klines]
-    lows=[float(k[3]) for k in klines]
     volumes=[float(k[5]) for k in klines]
 
     price=closes[-1]
@@ -172,7 +217,6 @@ def indicator_score(symbol):
         score+=10
 
     entry=price
-
     sl=entry*(1-STOP_LOSS_PERCENT/100)
     tp=entry*(1+TAKE_PROFIT_PERCENT/100)
 
@@ -196,6 +240,9 @@ def indicator_score(symbol):
         "pnl":pnl
     }
 
+
+# ---------------- OPEN TRADE ----------------
+
 def open_trade(symbol,side):
 
     if symbol in active_trades:
@@ -206,16 +253,16 @@ def open_trade(symbol,side):
 
     price=float(client.futures_mark_price(symbol=symbol)["markPrice"])
 
-    qty=TRADE_SIZE/price
-
-    qty=adjust_min_notional(symbol,price,qty)
-    qty=format_qty(symbol,qty)
+    qty=safe_quantity(symbol,price)
 
     try:
 
         set_margin(symbol)
 
-        client.futures_change_leverage(symbol=symbol,leverage=LEVERAGE)
+        client.futures_change_leverage(
+            symbol=symbol,
+            leverage=LEVERAGE
+        )
 
         client.futures_create_order(
             symbol=symbol,
@@ -237,6 +284,9 @@ def open_trade(symbol,side):
     except Exception as e:
         print(e)
 
+
+# ---------------- CLOSE TRADE ----------------
+
 def close_trade(symbol):
 
     if symbol not in active_trades:
@@ -248,9 +298,7 @@ def close_trade(symbol):
 
     price=float(client.futures_mark_price(symbol=symbol)["markPrice"])
 
-    qty=TRADE_SIZE/price
-
-    qty=format_qty(symbol,qty)
+    qty=safe_quantity(symbol,price)
 
     try:
 
@@ -266,49 +314,16 @@ def close_trade(symbol):
 
     del active_trades[symbol]
 
-def update_trailing(symbol,price):
 
-    trade=active_trades[symbol]
-
-    entry=trade["entry"]
-
-    profit=((price-entry)/entry)*100
-
-    if profit>TRAIL_START:
-
-        if price>trade["highest"]:
-
-            trade["highest"]=price
-
-            new_sl=price*(1-TRAIL_STEP/100)
-
-            if new_sl>trade["sl"]:
-                trade["sl"]=new_sl
+# ---------------- TRADE MONITOR ----------------
 
 def monitor_trades():
 
     while True:
 
-        positions=client.futures_position_information()
-
-        exchange_symbols=set()
-
-        for p in positions:
-
-            qty=float(p["positionAmt"])
-
-            if qty!=0:
-                exchange_symbols.add(p["symbol"])
-
         for symbol in list(active_trades.keys()):
 
-            if symbol not in exchange_symbols:
-                del active_trades[symbol]
-                continue
-
             price=float(client.futures_mark_price(symbol=symbol)["markPrice"])
-
-            update_trailing(symbol,price)
 
             trade=active_trades[symbol]
 
@@ -316,6 +331,9 @@ def monitor_trades():
                 close_trade(symbol)
 
         time.sleep(3)
+
+
+# ---------------- BOT LOOP ----------------
 
 def bot_loop():
 
@@ -354,8 +372,11 @@ def bot_loop():
 
                 results.append(r)
 
-                if r["score"]>=80:
-                    open_trade(s,"BUY")
+                if r["score"] >= 70:
+                 open_trade(s,"BUY")
+
+                elif r["score"] <= 30:
+                    open_trade(s,"SELL")
 
             except:
                 pass
@@ -369,9 +390,17 @@ def bot_loop():
 
         time.sleep(20)
 
+
+# ---------------- THREADS ----------------
+
 threading.Thread(target=bot_loop,daemon=True).start()
 threading.Thread(target=monitor_trades,daemon=True).start()
 
+
+# ---------------- GUI ----------------
+
 root=tk.Tk()
-BotGUI(root,close_trade)
+
+BotGUI(root,close_trade,open_trade,open_trade)
+
 root.mainloop()
