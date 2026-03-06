@@ -2,49 +2,46 @@ import tkinter as tk
 from tkinter import ttk
 from datetime import datetime
 
-scan_log=[]
+top30=[]
 top_candidates=[]
-pair_stats={"total":0,"scanned":0,"round_time":0}
+pair_stats={"total":0,"scanned":0,"last_scan":""}
 
 class BotGUI:
 
     def __init__(self,root):
 
         self.root=root
-        root.title("AI Crypto Scanner")
-        root.geometry("1200x700")
+        root.title("AI Futures Scanner")
+        root.geometry("1200x720")
 
-        bar=tk.Frame(root)
-        bar.pack(fill=tk.X)
+        topbar=tk.Frame(root)
+        topbar.pack(fill=tk.X)
 
-        self.update_label=tk.Label(bar,text="")
-        self.update_label.pack(side=tk.LEFT,padx=10)
+        self.time_label=tk.Label(topbar,text="")
+        self.time_label.pack(side=tk.LEFT,padx=10)
 
-        self.pairs=tk.Label(bar,text="Pairs 0/0")
-        self.pairs.pack(side=tk.LEFT,padx=20)
+        self.scan_label=tk.Label(topbar,text="")
+        self.scan_label.pack(side=tk.LEFT,padx=20)
 
-        self.timer=tk.Label(bar,text="Round:0s")
-        self.timer.pack(side=tk.LEFT,padx=20)
+        self.progress=ttk.Progressbar(topbar,length=300)
+        self.progress.pack(side=tk.RIGHT,padx=20)
 
-        scan_frame=tk.LabelFrame(root,text="Scanning")
-        scan_frame.pack(fill=tk.BOTH,expand=True,padx=10,pady=5)
+        frame1=tk.LabelFrame(root,text="Selected 30 Coins")
+        frame1.pack(fill=tk.BOTH,expand=True,padx=10,pady=5)
 
-        self.progress=ttk.Progressbar(scan_frame,length=400)
-        self.progress.pack(pady=5)
+        self.list30=tk.Listbox(frame1)
+        self.list30.pack(fill=tk.BOTH,expand=True)
 
-        self.scan=tk.Listbox(scan_frame)
-        self.scan.pack(fill=tk.BOTH,expand=True)
+        frame2=tk.LabelFrame(root,text="Top 10 Signals")
+        frame2.pack(fill=tk.BOTH,expand=True,padx=10,pady=5)
 
-        top_frame=tk.LabelFrame(root,text="Top Signals")
-        top_frame.pack(fill=tk.BOTH,expand=True,padx=10,pady=5)
+        cols=("Rank","Coin","Signal","Score","Profit%","Entry","SL","TP")
 
-        cols=("Rank","Coin","Signal","Score","Profit")
-
-        self.tree=ttk.Treeview(top_frame,columns=cols,show="headings")
+        self.tree=ttk.Treeview(frame2,columns=cols,show="headings")
 
         for c in cols:
             self.tree.heading(c,text=c)
-            self.tree.column(c,width=120)
+            self.tree.column(c,width=110)
 
         self.tree.pack(fill=tk.BOTH,expand=True)
 
@@ -55,39 +52,34 @@ class BotGUI:
 
     def update_gui(self):
 
-        self.update_label.config(
-            text="Update "+datetime.now().strftime("%H:%M:%S")
+        self.time_label.config(
+            text="Time: "+datetime.now().strftime("%H:%M:%S")
         )
 
         total=pair_stats["total"]
         scanned=pair_stats["scanned"]
 
+        percent=0
         if total>0:
             percent=(scanned/total)*100
-        else:
-            percent=0
 
         self.progress["value"]=percent
 
-        self.pairs.config(
-            text=f"Pairs {scanned}/{total}"
+        self.scan_label.config(
+            text=f"Pairs {scanned}/{total} | Last Scan {pair_stats['last_scan']}"
         )
 
-        self.timer.config(
-            text=f"Round {pair_stats.get('round_time',0)}s"
-        )
+        self.list30.delete(0,tk.END)
 
-        self.scan.delete(0,tk.END)
-
-        for s in scan_log[-30:]:
-            self.scan.insert(tk.END,s)
+        for c in top30:
+            self.list30.insert(tk.END,c)
 
         for r in self.tree.get_children():
             self.tree.delete(r)
 
         rank=1
 
-        for c in top_candidates[:10]:
+        for c in top_candidates:
 
             row=self.tree.insert(
                 "",
@@ -97,7 +89,10 @@ class BotGUI:
                     c["symbol"],
                     c["signal"],
                     c["score"],
-                    c["profit"]
+                    c["profit"],
+                    c["entry"],
+                    c["sl"],
+                    c["tp"]
                 )
             )
 

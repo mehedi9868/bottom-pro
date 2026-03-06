@@ -1,18 +1,22 @@
 import time
 import threading
 import statistics
+from datetime import datetime,timedelta
 
 from binance.client import Client
 import tkinter as tk
 
-from gui_monitor import scan_log,top_candidates,pair_stats,BotGUI
+from gui_monitor import top30,top_candidates,pair_stats,BotGUI
 
 API_KEY=""
 API_SECRET=""
 
 client=Client(API_KEY,API_SECRET)
 
-print("Scanner started")
+print("AI Scanner Started")
+
+STOP_LOSS_PERCENT=2
+TAKE_PROFIT_PERCENT=10
 
 info=client.futures_exchange_info()
 
@@ -23,18 +27,16 @@ for s in info["symbols"]:
     if s["status"]!="TRADING":
         continue
 
-    if s["contractType"]!="PERPETUAL":
+    if not s["symbol"].endswith("USDT"):
         continue
 
-    symbol=s["symbol"]
-
-    if not symbol.endswith("USDT"):
-        continue
-
-    ACTIVE_SYMBOLS.append(symbol)
+    ACTIVE_SYMBOLS.append(s["symbol"])
 
 pair_stats["total"]=len(ACTIVE_SYMBOLS)
 
+next_scan=datetime.now()
+
+active_30=[]
 
 def fast_scan():
 
@@ -55,43 +57,24 @@ def fast_scan():
         low=float(t["lowPrice"])
         price=float(t["lastPrice"])
 
-        vol_score=0
-
-        if volume>50000000:
-            vol_score=25
-        elif volume>20000000:
-            vol_score=15
-        else:
-            vol_score=5
-
         volatility=((high-low)/price)*100
 
-        volat_score=0
+        score=0
 
-        if volatility>6:
-            volat_score=25
-        elif volatility>4:
-            volat_score=15
-        elif volatility>2:
-            volat_score=8
+        if volume>30000000:
+            score+=30
 
-        trend_score=0
+        if volatility>5:
+            score+=30
 
-        if abs(change)>5:
-            trend_score=20
-        elif abs(change)>3:
-            trend_score=15
-        elif abs(change)>1:
-            trend_score=10
-
-        score=vol_score+volat_score+trend_score
+        if abs(change)>3:
+            score+=20
 
         results.append((symbol,score))
 
     results.sort(key=lambda x:x[1],reverse=True)
 
     return [r[0] for r in results[:30]]
-
 
 def indicator_score(symbol):
 
@@ -106,80 +89,97 @@ def indicator_score(symbol):
     lows=[float(k[3]) for k in klines]
     volumes=[float(k[5]) for k in klines]
 
+    price=closes[-1]
+
     score=50
 
     ema20=sum(closes[-20:])/20
     ema50=sum(closes[-50:])/50
 
     if ema20>ema50:
-        score+=10
+        score+=15
     else:
-        score-=10
+        score-=15
 
-    avg=statistics.mean(volumes[:-1])
+    avg_vol=statistics.mean(volumes[:-1])
 
-    if volumes[-1]>avg*1.8:
+    if volumes[-1]>avg_vol*1.8:
         score+=10
 
-    high=max(highs[-20:-1])
+    breakout=max(highs[-20:-1])
 
-    if closes[-1]>high:
+    if price>breakout:
         score+=10
-
-    atr=statistics.mean([highs[i]-lows[i] for i in range(-14,0)])
-
-    if atr/closes[-1]>0.01:
-        score+=8
 
     support=min(lows[-20:])
     resistance=max(highs[-20:])
 
-    up=(resistance-closes[-1])/closes[-1]*100
-    down=(closes[-1]-support)/closes[-1]*100
+    up=(resistance-price)/price*100
+    down=(price-support)/price*100
 
     profit=max(up,down)
+
+    entry=price
+
+    sl=round(entry*(1-STOP_LOSS_PERCENT/100),6)
+
+    tp=round(entry*(1+TAKE_PROFIT_PERCENT/100),6)
 
     if score>100:
         score=100
 
-    if score<0:
-        score=0
-
     signal="HOLD"
 
-    if score>=60:
+    if score>=80:
         signal="BUY"
 
-    if score<=40:
+    if score<=20:
         signal="SELL"
 
     return {
         "symbol":symbol,
         "score":round(score,2),
         "signal":signal,
-        "profit":round(profit,2)
+        "profit":round(profit,2),
+        "entry":round(entry,6),
+        "sl":sl,
+        "tp":tp
     }
 
-
 def bot_loop():
+
+    global next_scan,active_30
 
     while True:
 
         try:
 
-            start=time.time()
+            now=datetime.now()
 
-            pair_stats["scanned"]=0
+            if now>=next_scan:
 
-            candidates=fast_scan()
+                print("FULL MARKET SCAN")
+
+                active_30=fast_scan()
+
+                top30.clear()
+
+                t=datetime.now().strftime("%H:%M")
+
+                for s in active_30:
+                    top30.append(f"{t}  {s}")
+
+                pair_stats["last_scan"]=t
+
+                next_scan=now+timedelta(hours=1)
 
             results=[]
 
-            for s in candidates:
+            pair_stats["scanned"]=0
+
+            for s in active_30:
 
                 pair_stats["scanned"]+=1
-
-                scan_log.append(s)
 
                 try:
 
@@ -200,16 +200,13 @@ def bot_loop():
             for r in results[:10]:
                 top_candidates.append(r)
 
-            pair_stats["round_time"]=round(time.time()-start,2)
-
             time.sleep(20)
 
         except Exception as e:
 
-            print(e)
+            print("ERROR:",e)
 
             time.sleep(5)
-
 
 threading.Thread(target=bot_loop,daemon=True).start()
 
