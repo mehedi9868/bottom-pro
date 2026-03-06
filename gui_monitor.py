@@ -13,6 +13,11 @@ stats_data={
     "profit":0
 }
 
+pair_stats={
+    "total":0,
+    "scanned":0
+}
+
 class BotGUI:
 
     def __init__(self,root):
@@ -30,16 +35,13 @@ class BotGUI:
         self.update_label=tk.Label(bar,text="")
         self.update_label.pack(side=tk.LEFT,padx=10)
 
-        self.winrate=tk.Label(bar,text="WinRate: 0%")
-        self.winrate.pack(side=tk.RIGHT,padx=10)
-
-        self.profit=tk.Label(bar,text="Profit: 0%")
-        self.profit.pack(side=tk.RIGHT,padx=10)
+        self.pairs=tk.Label(bar,text="Pairs: 0/0")
+        self.pairs.pack(side=tk.LEFT,padx=20)
 
         log_frame=tk.LabelFrame(root,text="Signals")
         log_frame.pack(fill=tk.X,padx=10,pady=5)
 
-        self.log=tk.Text(log_frame,height=10)
+        self.log=tk.Text(log_frame,height=8)
         self.log.pack(fill=tk.X)
 
         trade_frame=tk.LabelFrame(root,text="Open Trades")
@@ -58,23 +60,13 @@ class BotGUI:
         self.tree.tag_configure("profit",foreground="green")
         self.tree.tag_configure("loss",foreground="red")
 
-        control=tk.Frame(root)
-        control.pack(fill=tk.X)
+        btn_frame=tk.Frame(root)
+        btn_frame.pack(fill=tk.X)
 
-        self.margin_type=tk.StringVar(value="ISOLATED")
+        self.close_btn=tk.Button(btn_frame,text="Close Selected Trade",
+                                 command=self.close_trade)
 
-        tk.Radiobutton(control,text="Isolated",
-                       variable=self.margin_type,
-                       value="ISOLATED").pack(side=tk.LEFT,padx=5)
-
-        tk.Radiobutton(control,text="Cross",
-                       variable=self.margin_type,
-                       value="CROSSED").pack(side=tk.LEFT,padx=5)
-
-        close_btn=tk.Button(control,text="Close Trade",
-                            command=self.close_trade)
-
-        close_btn.pack(side=tk.RIGHT,padx=10)
+        self.close_btn.pack(side=tk.RIGHT,padx=10)
 
         bottom=tk.Frame(root)
         bottom.pack(fill=tk.BOTH,expand=True)
@@ -110,7 +102,7 @@ class BotGUI:
 
         try:
             from pro_bot import close_position
-            close_position(symbol,self.margin_type.get())
+            close_position(symbol)
         except:
             pass
 
@@ -123,9 +115,13 @@ class BotGUI:
         try:
             from pro_bot import get_futures_balance
             bal=get_futures_balance()
-            self.balance.config(text=f"Futures Balance: {round(bal,2)} USDT")
+            self.balance.config(text=f"Balance: {round(bal,2)} USDT")
         except:
             pass
+
+        self.pairs.config(
+            text=f"Pairs: {pair_stats['scanned']} / {pair_stats['total']}"
+        )
 
         while signal_log:
             msg=signal_log.pop(0)
@@ -167,18 +163,5 @@ class BotGUI:
 
         for c in top_candidates[:5]:
             self.top.insert("",tk.END,values=(c["symbol"],c["score"]))
-
-        wins=stats_data["wins"]
-        losses=stats_data["losses"]
-
-        total=wins+losses
-
-        if total>0:
-            winrate=round((wins/total)*100,2)
-        else:
-            winrate=0
-
-        self.winrate.config(text=f"WinRate: {winrate}%")
-        self.profit.config(text=f"Profit: {round(stats_data['profit'],2)}%")
 
         self.root.after(1500,self.update_gui)

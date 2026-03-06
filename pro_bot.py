@@ -6,7 +6,7 @@ import math
 from binance.client import Client
 import tkinter as tk
 
-from gui_monitor import open_trades,signal_log,scan_log,top_candidates,stats_data,BotGUI
+from gui_monitor import open_trades,signal_log,scan_log,top_candidates,pair_stats,BotGUI
 
 
 with open("config.json") as f:
@@ -19,16 +19,12 @@ TRADE_SIZE=config["TRADE_SIZE"]
 MAX_TRADES=config["MAX_TRADES"]
 
 PRICE_INTERVAL=config["PRICE_INTERVAL"]
-CHART_INTERVAL=config["CHART_INTERVAL"]
-
 SCAN_COINS=config["SCAN_COINS"]
-
 ATR_PERIOD=config["ATR_PERIOD"]
 
 client=Client(API_KEY,API_SECRET)
 
 print("Bot Started")
-
 
 def get_futures_balance():
 
@@ -68,6 +64,8 @@ for s in info["symbols"]:
         "step":float(filters["LOT_SIZE"]["stepSize"])
     }
 
+pair_stats["total"]=len(ACTIVE_SYMBOLS)
+
 
 def get_price(symbol):
 
@@ -101,6 +99,10 @@ def calculate_ATR(symbol):
 
 def create_trade(symbol,price,atr):
 
+    for t in open_trades:
+        if t["symbol"]==symbol:
+            return
+
     stop=price-atr*1.5
     tp=price+atr*2
 
@@ -127,7 +129,7 @@ def create_trade(symbol,price,atr):
 
         entry=float(order["avgPrice"])
 
-        signal_log.append(f"BUY {symbol} {entry}")
+        signal_log.append(f"BUY {symbol}")
 
         open_trades.append({
             "symbol":symbol,
@@ -144,16 +146,7 @@ def create_trade(symbol,price,atr):
         signal_log.append(str(e))
 
 
-def close_position(symbol,margin_type):
-
-    try:
-
-        client.futures_change_margin_type(
-            symbol=symbol,
-            marginType=margin_type
-        )
-    except:
-        pass
+def close_position(symbol):
 
     try:
 
@@ -184,7 +177,32 @@ def close_position(symbol,margin_type):
         signal_log.append(str(e))
 
 
+def sync_positions():
+
+    positions=client.futures_position_information()
+
+    active={}
+
+    for p in positions:
+
+        amt=float(p["positionAmt"])
+
+        if amt!=0:
+
+            symbol=p["symbol"]
+            entry=float(p["entryPrice"])
+
+            active[symbol]=entry
+
+    for t in open_trades[:]:
+
+        if t["symbol"] not in active:
+            open_trades.remove(t)
+
+
 def update_trades():
+
+    sync_positions()
 
     for t in open_trades:
 
@@ -198,45 +216,8 @@ def update_trades():
 
             t["pnl"]=pnl
 
-            if price>=t["tp"]:
-
-                t["status"]="TP"
-                stats_data["wins"]+=1
-                stats_data["profit"]+=pnl
-
-            if price<=t["atr_stop"]:
-
-                t["status"]="SL"
-                stats_data["losses"]+=1
-                stats_data["profit"]+=pnl
-
         except:
             pass
-
-
-def get_top_coins():
-
-    tickers=client.futures_ticker()
-
-    coins=[]
-
-    for t in tickers:
-
-        symbol=t["symbol"]
-
-        if symbol not in ACTIVE_SYMBOLS:
-            continue
-
-        volume=float(t["quoteVolume"])
-
-        coins.append({
-            "symbol":symbol,
-            "volume":volume
-        })
-
-    coins.sort(key=lambda x:x["volume"],reverse=True)
-
-    return coins[:SCAN_COINS]
 
 
 def bot_loop():
@@ -245,13 +226,11 @@ def bot_loop():
 
         try:
 
-            coins=get_top_coins()
+            pair_stats["scanned"]=0
 
-            top_candidates.clear()
+            for symbol in ACTIVE_SYMBOLS:
 
-            for c in coins:
-
-                symbol=c["symbol"]
+                pair_stats["scanned"]+=1
 
                 scan_log.append(symbol)
 
@@ -277,12 +256,13 @@ def bot_loop():
         except Exception as e:
 
             signal_log.append(str(e))
-
             time.sleep(5)
 
 
 threading.Thread(target=bot_loop,daemon=True).start()
 
-root=tk.Tk()
-BotGUI(root)
-root.mainloop()
+if __name__=="__main__":
+
+    root=tk.Tk()
+    BotGUI(root)
+    root.mainloop()
