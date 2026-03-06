@@ -3,110 +3,107 @@ import time
 import threading
 import statistics
 import math
-from datetime import datetime,timedelta
+from datetime import datetime, timedelta
 
 from binance.client import Client
 from binance.enums import *
 
 import tkinter as tk
-from gui_monitor import top30,top_candidates,pair_stats,BotGUI
+from gui_monitor import top30, top_candidates, pair_stats, BotGUI
 
 
-# ---------------- CONFIG ----------------
+# ================= CONFIG =================
 
 with open("config.json") as f:
-    config=json.load(f)
+    config = json.load(f)
 
-API_KEY=config["api_key"]
-API_SECRET=config["api_secret"]
+API_KEY = config["api_key"]
+API_SECRET = config["api_secret"]
 
-LEVERAGE=config["LEVERAGE"]
-TRADE_SIZE=config["TRADE_SIZE"]
-MAX_TRADES=config["MAX_TRADES"]
-MARGIN_TYPE=config["MARGIN_TYPE"]
+LEVERAGE = config["LEVERAGE"]
+TRADE_SIZE = config["TRADE_SIZE"]
+MAX_TRADES = config["MAX_TRADES"]
+MARGIN_TYPE = config["MARGIN_TYPE"]
 
-STOP_LOSS_PERCENT=.01
-TAKE_PROFIT_PERCENT=10
+# ---- Trading Settings ----
+STOP_LOSS_PERCENT = 1
+TAKE_PROFIT_PERCENT = 0.5
 
-TRAIL_START=3
-TRAIL_STEP=1
+client = Client(API_KEY, API_SECRET)
 
-
-client=Client(API_KEY,API_SECRET)
-
-symbol_filters={}
-active_trades={}
-active_30=[]
-next_scan=datetime.now()
+symbol_filters = {}
+active_trades = {}
+active_30 = []
+next_scan = datetime.now()
 
 
-# ---------------- LOAD SYMBOL INFO ----------------
+# ================= LOAD SYMBOL INFO =================
 
 def load_symbols():
 
-    info=client.futures_exchange_info()
+    info = client.futures_exchange_info()
 
     for s in info["symbols"]:
 
-        symbol=s["symbol"]
+        symbol = s["symbol"]
 
         if not symbol.endswith("USDT"):
             continue
 
-        step=None
-        min_qty=None
+        step = None
+        min_qty = None
 
         for f in s["filters"]:
 
-            if f["filterType"]=="LOT_SIZE":
+            if f["filterType"] == "LOT_SIZE":
 
-                step=float(f["stepSize"])
-                min_qty=float(f["minQty"])
+                step = float(f["stepSize"])
+                min_qty = float(f["minQty"])
 
-        symbol_filters[symbol]={
-            "step":step,
-            "min_qty":min_qty
+        symbol_filters[symbol] = {
+            "step": step,
+            "min_qty": min_qty
         }
 
 
 load_symbols()
 
-ACTIVE_SYMBOLS=list(symbol_filters.keys())
+ACTIVE_SYMBOLS = list(symbol_filters.keys())
 
-pair_stats["total"]=len(ACTIVE_SYMBOLS)
-
-
-# ---------------- SAFE QUANTITY ----------------
-
-def format_quantity(symbol,qty):
-
-    step=symbol_filters[symbol]["step"]
-
-    precision=int(round(-math.log(step,10),0))
-
-    qty=math.floor(qty*(10**precision))/(10**precision)
-
-    return qty
+pair_stats["total"] = len(ACTIVE_SYMBOLS)
 
 
-def safe_quantity(symbol,price):
+# ================= SAFE QUANTITY =================
 
-    qty=TRADE_SIZE/price
+def format_quantity(symbol, qty):
 
-    min_notional=5.5
+    step = symbol_filters[symbol]["step"]
 
-    if qty*price<min_notional:
-        qty=min_notional/price
+    precision = int(round(-math.log(step, 10), 0))
 
-    qty=format_quantity(symbol,qty)
-
-    if qty<symbol_filters[symbol]["min_qty"]:
-        qty=symbol_filters[symbol]["min_qty"]
+    qty = math.floor(qty * (10 ** precision)) / (10 ** precision)
 
     return qty
 
 
-# ---------------- MARGIN ----------------
+def safe_quantity(symbol, price):
+
+    qty = TRADE_SIZE / price
+
+    min_notional = 5.5
+
+    if qty * price < min_notional:
+        qty = min_notional / price
+
+    qty = format_quantity(symbol, qty)
+
+    if qty < symbol_filters[symbol]["min_qty"]:
+        qty = symbol_filters[symbol]["min_qty"]
+
+    return qty
+
+
+# ================= MARGIN =================
 
 def set_margin(symbol):
 
@@ -119,140 +116,154 @@ def set_margin(symbol):
         pass
 
 
-# ---------------- PNL ----------------
+# ================= PNL =================
 
 def calculate_pnl(symbol):
 
-    trade=active_trades.get(symbol)
+    trade = active_trades.get(symbol)
 
     if not trade:
         return 0
 
-    price=float(client.futures_mark_price(symbol=symbol)["markPrice"])
+    price = float(client.futures_mark_price(symbol=symbol)["markPrice"])
 
-    entry=trade["entry"]
+    entry = trade["entry"]
 
-    pnl=((price-entry)/entry)*100
+    pnl = ((price - entry) / entry) * 100
 
-    if trade["side"]=="SELL":
-        pnl=-pnl
+    if trade["side"] == "SELL":
+        pnl = -pnl
 
-    return round(pnl,2)
+    return round(pnl, 2)
 
 
-# ---------------- FAST SCAN ----------------
+# ================= FAST SCAN =================
 
 def fast_scan():
 
-    tickers=client.futures_ticker()
+    tickers = client.futures_ticker()
 
-    results=[]
+    results = []
 
     for t in tickers:
 
-        symbol=t["symbol"]
+        symbol = t["symbol"]
 
         if symbol not in ACTIVE_SYMBOLS:
             continue
 
-        volume=float(t["quoteVolume"])
-        change=float(t["priceChangePercent"])
-        high=float(t["highPrice"])
-        low=float(t["lowPrice"])
-        price=float(t["lastPrice"])
+        volume = float(t["quoteVolume"])
+        change = float(t["priceChangePercent"])
+        high = float(t["highPrice"])
+        low = float(t["lowPrice"])
+        price = float(t["lastPrice"])
 
-        if price<=0:
+        if price <= 0:
             continue
 
-        volatility=((high-low)/price)*100
+        volatility = ((high - low) / price) * 100
 
-        score=0
+        score = 0
 
-        if volume>30000000:
-            score+=30
+        if volume > 30000000:
+            score += 30
 
-        if volatility>5:
-            score+=30
+        if volatility > 5:
+            score += 30
 
-        if abs(change)>3:
-            score+=20
+        if abs(change) > 3:
+            score += 20
 
-        results.append((symbol,score))
+        results.append((symbol, score))
 
-    results.sort(key=lambda x:x[1],reverse=True)
+    results.sort(key=lambda x: x[1], reverse=True)
 
     return [r[0] for r in results[:30]]
 
 
-# ---------------- SIGNAL ----------------
+# ================= SIGNAL ENGINE =================
 
 def indicator_score(symbol):
 
-    klines=client.futures_klines(symbol=symbol,interval="5m",limit=120)
+    klines = client.futures_klines(symbol=symbol, interval="5m", limit=120)
 
-    closes=[float(k[4]) for k in klines]
-    highs=[float(k[2]) for k in klines]
-    volumes=[float(k[5]) for k in klines]
+    closes = [float(k[4]) for k in klines]
+    highs = [float(k[2]) for k in klines]
+    lows = [float(k[3]) for k in klines]
+    volumes = [float(k[5]) for k in klines]
 
-    price=closes[-1]
+    price = closes[-1]
 
-    score=50
+    score = 50
 
-    ema20=sum(closes[-20:])/20
-    ema50=sum(closes[-50:])/50
+    ema20 = sum(closes[-20:]) / 20
+    ema50 = sum(closes[-50:]) / 50
 
-    if ema20>ema50:
-        score+=15
+    if ema20 > ema50:
+        score += 15
     else:
-        score-=15
+        score -= 15
 
-    avg_vol=statistics.mean(volumes[:-1])
+    avg_vol = statistics.mean(volumes[:-1])
 
-    if volumes[-1]>avg_vol*1.8:
-        score+=10
+    if volumes[-1] > avg_vol * 1.8:
+        score += 10
 
-    breakout=max(highs[-20:-1])
+    breakout = max(highs[-20:-1])
+    breakdown = min(lows[-20:-1])
 
-    if price>breakout:
-        score+=10
+    if price > breakout:
+        score += 10
 
-    entry=price
-    sl=entry*(1-STOP_LOSS_PERCENT/100)
-    tp=entry*(1+TAKE_PROFIT_PERCENT/100)
+    if price < breakdown:
+        score -= 10
 
-    signal="HOLD"
+    entry = price
 
-    if score>=70:
-        signal="BUY"
+    pnl = calculate_pnl(symbol)
 
-    if score<=30:
-        signal="SELL"
+    signal = "HOLD"
 
-    pnl=calculate_pnl(symbol)
+    if score >= 65:
+        signal = "BUY"
+
+    elif score <= 35:
+        signal = "SELL"
+
+    if signal == "BUY":
+
+        sl = entry * (1 - STOP_LOSS_PERCENT / 100)
+        tp = entry * (1 + TAKE_PROFIT_PERCENT / 100)
+
+    else:
+
+        sl = entry * (1 + STOP_LOSS_PERCENT / 100)
+        tp = entry * (1 - TAKE_PROFIT_PERCENT / 100)
 
     return {
-        "symbol":symbol,
-        "score":score,
-        "signal":signal,
-        "entry":entry,
-        "sl":sl,
-        "tp":tp,
-        "pnl":pnl
+        "symbol": symbol,
+        "score": score,
+        "signal": signal,
+        "entry": entry,
+        "sl": sl,
+        "tp": tp,
+        "pnl": pnl
     }
 
 
-# ---------------- OPEN TRADE ----------------
-def open_trade(symbol,side):
+# ================= OPEN TRADE =================
+
+def open_trade(symbol, side):
 
     if symbol in active_trades:
         return
 
-    if len(active_trades)>=MAX_TRADES:
+    if len(active_trades) >= MAX_TRADES:
         return
 
-    price=float(client.futures_mark_price(symbol=symbol)["markPrice"])
+    price = float(client.futures_mark_price(symbol=symbol)["markPrice"])
 
-    qty=safe_quantity(symbol,price)
+    qty = safe_quantity(symbol, price)
 
     try:
 
@@ -263,262 +274,82 @@ def open_trade(symbol,side):
             leverage=LEVERAGE
         )
 
-        # MARKET ENTRY
-        client.futures_create_order(
-            symbol=symbol,
-            side=SIDE_BUY if side=="BUY" else SIDE_SELL,
-            type=ORDER_TYPE_MARKET,
-            quantity=qty
-        )
+        if side == "BUY":
 
-        entry=price
+            client.futures_create_order(
+                symbol=symbol,
+                side=SIDE_BUY,
+                type=ORDER_TYPE_MARKET,
+                quantity=qty
+            )
 
-        # TP SL CALCULATION
-        if side=="BUY":
-            sl=entry*(1-STOP_LOSS_PERCENT/100)
-            tp=entry*(1+TAKE_PROFIT_PERCENT/100)
-            close_side=SIDE_SELL
+            sl = price * (1 - STOP_LOSS_PERCENT / 100)
+            tp = price * (1 + TAKE_PROFIT_PERCENT / 100)
+
+            close_side = SIDE_SELL
+
         else:
-            sl=entry*(1+STOP_LOSS_PERCENT/100)
-            tp=entry*(1-TAKE_PROFIT_PERCENT/100)
-            close_side=SIDE_BUY
 
-        active_trades[symbol]={
-            "side":side,
-            "entry":entry,
-            "sl":sl,
-            "tp":tp,
-            "highest":entry
+            client.futures_create_order(
+                symbol=symbol,
+                side=SIDE_SELL,
+                type=ORDER_TYPE_MARKET,
+                quantity=qty
+            )
+
+            sl = price * (1 + STOP_LOSS_PERCENT / 100)
+            tp = price * (1 - TAKE_PROFIT_PERCENT / 100)
+
+            close_side = SIDE_BUY
+
+        active_trades[symbol] = {
+            "side": side,
+            "entry": price,
+            "sl": sl,
+            "tp": tp
         }
 
-        # STOP LOSS ORDER
         client.futures_create_order(
             symbol=symbol,
             side=close_side,
             type="STOP_MARKET",
-            stopPrice=round(sl,6),
+            stopPrice=round(sl, 6),
             workingType="MARK_PRICE",
             closePosition=True
         )
 
-        # TAKE PROFIT ORDER
         client.futures_create_order(
             symbol=symbol,
             side=close_side,
             type="TAKE_PROFIT_MARKET",
-            stopPrice=round(tp,6),
+            stopPrice=round(tp, 6),
             workingType="MARK_PRICE",
             closePosition=True
         )
 
-        print(f"TRADE OPENED {symbol} {side} | Entry:{entry} TP:{tp} SL:{sl}")
+        print(f"TRADE OPENED {symbol} {side} | Entry:{price} TP:{tp} SL:{sl}")
 
     except Exception as e:
-        print("TRADE ERROR:",e)
-
-    if symbol in active_trades:
-        return
-
-    if len(active_trades)>=MAX_TRADES:
-        return
-
-    price=float(client.futures_mark_price(symbol=symbol)["markPrice"])
-
-    qty=safe_quantity(symbol,price)
-
-    try:
-
-        set_margin(symbol)
-
-        client.futures_change_leverage(
-            symbol=symbol,
-            leverage=LEVERAGE
-        )
-
-        # MARKET ENTRY
-        client.futures_create_order(
-            symbol=symbol,
-            side=SIDE_BUY if side=="BUY" else SIDE_SELL,
-            type=ORDER_TYPE_MARKET,
-            quantity=qty
-        )
-
-        entry=price
-
-        # TP SL CALCULATION
-        if side=="BUY":
-            sl=entry*(1-STOP_LOSS_PERCENT/100)
-            tp=entry*(1+TAKE_PROFIT_PERCENT/100)
-            close_side=SIDE_SELL
-        else:
-            sl=entry*(1+STOP_LOSS_PERCENT/100)
-            tp=entry*(1-TAKE_PROFIT_PERCENT/100)
-            close_side=SIDE_BUY
-
-        active_trades[symbol]={
-            "side":side,
-            "entry":entry,
-            "sl":sl,
-            "tp":tp,
-            "highest":entry
-        }
-
-        # STOP LOSS ORDER
-        client.futures_create_order(
-            symbol=symbol,
-            side=close_side,
-            type="STOP_MARKET",
-            stopPrice=round(sl,6),
-            workingType="MARK_PRICE",
-            closePosition=True
-        )
-
-        # TAKE PROFIT ORDER
-        client.futures_create_order(
-            symbol=symbol,
-            side=close_side,
-            type="TAKE_PROFIT_MARKET",
-            stopPrice=round(tp,6),
-            workingType="MARK_PRICE",
-            closePosition=True
-        )
-
-        print(f"TRADE OPENED {symbol} {side} | Entry:{entry} TP:{tp} SL:{sl}")
-
-    except Exception as e:
-        print("TRADE ERROR:",e)
-
-    if symbol in active_trades:
-        return
-
-    if len(active_trades)>=MAX_TRADES:
-        return
-
-    price=float(client.futures_mark_price(symbol=symbol)["markPrice"])
-
-    qty=safe_quantity(symbol,price)
-
-    try:
-
-        set_margin(symbol)
-
-        client.futures_change_leverage(
-            symbol=symbol,
-            leverage=LEVERAGE
-        )
-
-        # OPEN MARKET ORDER
-        client.futures_create_order(
-            symbol=symbol,
-            side=SIDE_BUY if side=="BUY" else SIDE_SELL,
-            type=ORDER_TYPE_MARKET,
-            quantity=qty
-        )
-
-        entry=price
-
-        # TP SL CALCULATION
-        if side=="BUY":
-            sl=entry*(1-STOP_LOSS_PERCENT/100)
-            tp=entry*(1+TAKE_PROFIT_PERCENT/100)
-            close_side=SIDE_SELL
-        else:
-            sl=entry*(1+STOP_LOSS_PERCENT/100)
-            tp=entry*(1-TAKE_PROFIT_PERCENT/100)
-            close_side=SIDE_BUY
-
-        active_trades[symbol]={
-            "side":side,
-            "entry":entry,
-            "sl":sl,
-            "tp":tp,
-            "highest":entry
-        }
-
-        # STOP LOSS ORDER
-        # client.futures_create_order(
-        #     symbol=symbol,
-        #     side=close_side,
-        #     type="STOP_MARKET",
-        #     stopPrice=round(sl,4),
-        #     closePosition=True
-        # )
-
-        # TAKE PROFIT ORDER
-        client.futures_create_order(
-            symbol=symbol,
-            side=close_side,
-            type="TAKE_PROFIT_MARKET",
-            stopPrice=round(tp,4),
-            closePosition=True
-        )
-
-    except Exception as e:
-        print(e)
-
-    if symbol in active_trades:
-        return
-
-    if len(active_trades)>=MAX_TRADES:
-        return
-
-    price=float(client.futures_mark_price(symbol=symbol)["markPrice"])
-
-    qty=safe_quantity(symbol,price)
-
-    try:
-
-        set_margin(symbol)
-
-        client.futures_change_leverage(
-            symbol=symbol,
-            leverage=LEVERAGE
-        )
-
-        client.futures_create_order(
-            symbol=symbol,
-            side=SIDE_BUY if side=="BUY" else SIDE_SELL,
-            type=ORDER_TYPE_MARKET,
-            quantity=qty
-        )
-
-        entry=price
-
-        active_trades[symbol]={
-            "side":side,
-            "entry":entry,
-            "sl":entry*(1-STOP_LOSS_PERCENT/100),
-            "tp":entry*(1+TAKE_PROFIT_PERCENT/100),
-            "highest":entry
-        }
-
-        # TAKE PROFIT ORDER
-        client.futures_create_order(
-            symbol=symbol,
-            side=close_side,
-            type="TAKE_PROFIT_MARKET",
-            stopPrice=round(tp,4),
-            closePosition=True
-        )
-
-    except Exception as e:
-        print(e)
+        print("TRADE ERROR:", e)
 
 
-# ---------------- CLOSE TRADE ----------------
+# ================= CLOSE TRADE =================
 
 def close_trade(symbol):
 
     if symbol not in active_trades:
         return
 
-    trade=active_trades[symbol]
+    price = float(client.futures_mark_price(symbol=symbol)["markPrice"])
 
-    side=SIDE_SELL if trade["side"]=="BUY" else SIDE_BUY
+    qty = safe_quantity(symbol, price)
 
-    price=float(client.futures_mark_price(symbol=symbol)["markPrice"])
+    trade = active_trades[symbol]
 
-    qty=safe_quantity(symbol,price)
+    if trade["side"] == "BUY":
+        side = SIDE_SELL
+    else:
+        side = SIDE_BUY
 
     try:
 
@@ -535,7 +366,7 @@ def close_trade(symbol):
     del active_trades[symbol]
 
 
-# ---------------- TRADE MONITOR ----------------
+# ================= TRADE MONITOR =================
 
 def monitor_trades():
 
@@ -543,65 +374,72 @@ def monitor_trades():
 
         for symbol in list(active_trades.keys()):
 
-            price=float(client.futures_mark_price(symbol=symbol)["markPrice"])
+            price = float(client.futures_mark_price(symbol=symbol)["markPrice"])
 
-            trade=active_trades[symbol]
+            trade = active_trades[symbol]
 
-            if price>=trade["tp"] or price<=trade["sl"]:
-                close_trade(symbol)
+            if trade["side"] == "BUY":
+
+                if price <= trade["sl"] or price >= trade["tp"]:
+                    close_trade(symbol)
+
+            else:
+
+                if price >= trade["sl"] or price <= trade["tp"]:
+                    close_trade(symbol)
 
         time.sleep(3)
 
 
-# ---------------- BOT LOOP ----------------
+# ================= BOT LOOP =================
 
 def bot_loop():
 
-    global next_scan,active_30
+    global next_scan, active_30
 
     while True:
 
-        now=datetime.now()
+        now = datetime.now()
 
-        if now>=next_scan:
+        if now >= next_scan:
 
-            active_30=fast_scan()
+            active_30 = fast_scan()
 
             top30.clear()
 
-            t=datetime.now().strftime("%H:%M")
+            t = datetime.now().strftime("%H:%M")
 
             for s in active_30:
                 top30.append(f"{t} {s}")
 
-            pair_stats["last_scan"]=t
+            pair_stats["last_scan"] = t
 
-            next_scan=now+timedelta(hours=1)
+            next_scan = now + timedelta(hours=1)
 
-        results=[]
+        results = []
 
-        pair_stats["scanned"]=0
+        pair_stats["scanned"] = 0
 
         for s in active_30:
 
-            pair_stats["scanned"]+=1
+            pair_stats["scanned"] += 1
 
             try:
 
-                r=indicator_score(s)
+                r = indicator_score(s)
 
                 results.append(r)
 
-                if r["score"] >= 60:
-                 open_trade(s,"BUY")
+                if r["signal"] == "BUY":
+                    open_trade(s, "BUY")
 
-                elif r["score"] <= 40:
-                    open_trade(s,"SELL")
+                elif r["signal"] == "SELL":
+                    open_trade(s, "SELL")
 
             except:
                 pass
 
-        results.sort(key=lambda x:x["score"],reverse=True)
+        results.sort(key=lambda x: x["score"], reverse=True)
 
         top_candidates.clear()
 
@@ -611,16 +449,16 @@ def bot_loop():
         time.sleep(20)
 
 
-# ---------------- THREADS ----------------
+# ================= THREADS =================
 
-threading.Thread(target=bot_loop,daemon=True).start()
-threading.Thread(target=monitor_trades,daemon=True).start()
+threading.Thread(target=bot_loop, daemon=True).start()
+threading.Thread(target=monitor_trades, daemon=True).start()
 
 
-# ---------------- GUI ----------------
+# ================= GUI =================
 
-root=tk.Tk()
+root = tk.Tk()
 
-BotGUI(root,close_trade,open_trade,open_trade)
+BotGUI(root, close_trade, open_trade, open_trade)
 
 root.mainloop()
